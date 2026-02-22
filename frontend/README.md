@@ -1,5 +1,31 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+## NextAuth + Keycloak setup
+
+1. Copy environment variables:
+
+```bash
+cp .env.example .env.local
+```
+
+2. Set values in `.env.local`:
+
+- `NEXTAUTH_SECRET`: generate one with `openssl rand -base64 32`
+- `KEYCLOAK_ISSUER`: e.g. `http://localhost:8080/realms/<your-realm>`
+- `KEYCLOAK_CLIENT_ID` and `KEYCLOAK_CLIENT_SECRET`: from your Keycloak client
+
+3. In Keycloak client settings, add callback URL:
+
+- `http://localhost:3000/api/auth/callback/keycloak`
+
+4. Start the app and test sign-in:
+
+```bash
+npm run dev
+```
+
+Open `http://localhost:3000` and click **Sign in with Keycloak**.
+
 ## Getting Started
 
 First, run the development server:
