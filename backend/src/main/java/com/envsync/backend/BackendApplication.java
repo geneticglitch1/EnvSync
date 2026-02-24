@@ -9,8 +9,8 @@ public class BackendApplication {
 	public static void main(String[] args) {
 		SpringApplication.run(BackendApplication.class, args);
 		//call the test
-		test t = new test();
 
+		test x = new test();
 
 	}
 
