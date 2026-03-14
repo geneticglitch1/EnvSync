@@ -1,118 +1,89 @@
-use anyhow::{Result, Context, anyhow};
-use directories::ProjectDirs;
-use serde::{Deserialize, Serialize};
+use anyhow::Result;
+use dialoguer::{Confirm, Input};
 use std::fs;
-use std::path::{Path, PathBuf};
-use sodiumoxide::crypto::box__;
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct AuthConfig {
-    pub access_token: String,
-    pub refresh_token: Option<String>,
-    pub expires_at: chrono::DateTime<chrono::Utc>,
-    pub user_id: String,
-    pub user_email: String,
-}
+use crate::api::vault::VaultClient;
+use crate::config::{Config, LocalProject};
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct KeypairConfig {
-    pub public_key: String,  // base64 encoded
-    pub private_key: String, // base64 encrypted with a passphrase?
-}
+pub async fn run(
+    name: Option<String>,
+    env: Option<String>,
+    api_url: &str,
+) -> Result<()> {
+    let config = Config::load()?;
+    let auth = config.require_auth()?;
+    let effective_api_url = if !api_url.is_empty() { api_url } else { &config.api_url };
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct VaultContext {
-    pub project_id: String,
-    pub project_name: String,
-    pub environment: String,
-    pub vault_key: Option<String>, // base64 encrypted with user's public key
-}
+    // Determine defaults from current directory
+    let cwd = std::env::current_dir()?;
+    let default_name = cwd
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("my-project")
+        .to_string();
 
-#[derive(Serialize, Deserialize, Debug, Default)]
-pub struct Config {
-    pub api_url: String,
-    pub auth: Option<AuthConfig>,
-    pub keypair: Option<KeypairConfig>,
-    pub current_context: Option<VaultContext>,
-}
+    let project_name: String = if let Some(n) = name {
+        n
+    } else {
+        Input::new()
+            .with_prompt("Project name")
+            .default(default_name)
+            .interact_text()?
+    };
 
-impl Config {
-    pub fn path() -> PathBuf {
-        ProjectDirs::from("com", "envsync", "cli")
-            .expect("Failed to get config directory")
-            .config_dir()
-            .join("config.toml")
-    }
+    let environment: String = if let Some(e) = env {
+        e
+    } else {
+        Input::new()
+            .with_prompt("Environment")
+            .default("development".to_string())
+            .interact_text()?
+    };
 
-    pub fn load() -> Result<Self> {
-        let path = Self::path();
-        if path.exists() {
-            let content = fs::read_to_string(&path)
-                .with_context(|| format!("Failed to read config from {:?}", path))?;
-            Ok(toml::from_str(&content)?)
-        } else {
-            Ok(Config::default())
+    println!("Creating project '{project_name}' ({environment})...");
+
+    // Check .envsync doesn't already exist
+    if LocalProject::path().exists() {
+        let overwrite = Confirm::new()
+            .with_prompt("A .envsync file already exists. Re-initialize?")
+            .default(false)
+            .interact()?;
+        if !overwrite {
+            println!("Aborted.");
+            return Ok(());
         }
     }
 
-    pub fn save(&self) -> Result<()> {
-        let path = Self::path();
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
+    let vc = VaultClient::new(effective_api_url, &auth.access_token);
+    let project = vc.create_project(&project_name, &environment).await?;
+
+    let local = LocalProject {
+        project_id: project.id.clone(),
+        project_name: project.name.clone(),
+        environment: project.environment.clone(),
+        latest_version: 0,
+    };
+    local.save()?;
+
+    // Ensure .envsync is in .gitignore
+    add_to_gitignore(&cwd)?;
+
+    println!("Initialized project '{}' (id: {})", project.name, project.id);
+    println!("  Environment : {}", project.environment);
+    println!("  .envsync    : written (gitignored)");
+    Ok(())
+}
+
+fn add_to_gitignore(dir: &std::path::Path) -> Result<()> {
+    let path = dir.join(".gitignore");
+    if path.exists() {
+        let content = fs::read_to_string(&path)?;
+        if !content.lines().any(|l| l.trim() == ".envsync") {
+            let sep = if content.ends_with('\n') || content.is_empty() { "" } else { "\n" };
+            fs::write(&path, format!("{content}{sep}.envsync\n"))?;
         }
-        let content = toml::to_string_pretty(self)?;
-        fs::write(&path, content)?;
-        Ok(())
+    } else {
+        fs::write(&path, ".envsync\n")?;
     }
-
-    pub fn get_auth_token(&self) -> Result<String> {
-        self.auth
-            .as_ref()
-            .map(|a| a.access_token.clone())
-            .ok_or_else(|| anyhow!("Not authenticated. Run 'envsync init' first."))
-    }
-
-    pub fn get_current_context(&self) -> Result<&VaultContext> {
-        self.current_context
-            .as_ref()
-            .ok_or_else(|| anyhow!("No project initialized. Run 'envsync init' in your project."))
-    }
-
-    pub fn set_current_context(&mut self, context: VaultContext) {
-        self.current_context = Some(context);
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct ProjectConfig {
-    pub project_name: String,
-    pub environment: String,
-    pub env_file_path: PathBuf,
-}
-
-impl ProjectConfig {
-    pub fn from_current_dir(project_name: Option<String>, environment: Option<String>) -> Result<Self> {
-        let current_dir = std::env::current_dir()?;
-
-        // Look for existing .env file
-        let env_file_path = current_dir.join(".env");
-
-        // If project name not provided, use directory name
-        let project_name = match project_name {
-            Some(name) => name,
-            None => current_dir
-                .file_name()
-                .and_then(|n| n.to_str())
-                .ok_or_else(|| anyhow!("Could not determine project name from directory"))?
-                .to_string(),
-        };
-
-        let environment = environment.unwrap_or_else(|| "development".to_string());
-
-        Ok(ProjectConfig {
-            project_name,
-            environment,
-            env_file_path,
-        })
-    }
+    Ok(())
 }

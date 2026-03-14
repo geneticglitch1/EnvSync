@@ -7,11 +7,11 @@
 
 [![Next.js](https://img.shields.io/badge/Next.js-15-black?style=flat-square&logo=next.js)](https://nextjs.org/)
 [![Spring Boot](https://img.shields.io/badge/Spring_Boot-3.x-6DB33F?style=flat-square&logo=springboot)](https://spring.io/projects/spring-boot)
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?style=flat-square&logo=postgresql)](https://www.postgresql.org/)
+[![Rust](https://img.shields.io/badge/Rust-CLI-CE422B?style=flat-square&logo=rust)](https://www.rust-lang.org/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15-4169E1?style=flat-square&logo=postgresql)](https://www.postgresql.org/)
 [![Redis](https://img.shields.io/badge/Redis-7-DC382D?style=flat-square&logo=redis)](https://redis.io/)
 [![MinIO](https://img.shields.io/badge/MinIO-Object_Storage-C72E49?style=flat-square&logo=minio)](https://min.io/)
 [![Keycloak](https://img.shields.io/badge/Keycloak-IAM-4D9B9B?style=flat-square)](https://www.keycloak.org/)
-[![NGINX](https://img.shields.io/badge/NGINX-Reverse_Proxy-009639?style=flat-square&logo=nginx)](https://nginx.org/)
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?style=flat-square&logo=docker)](https://www.docker.com/)
 
 > Stop sending `.env` files over Slack. Stop wondering if your teammate has the latest secrets. EnvSync is a CLI + web dashboard that gives your team a single encrypted source of truth for environment variables — with diffing, versioning, and real-time notifications. **100% self-hosted. Zero cloud dependencies.**
@@ -34,14 +34,15 @@ Environment variable drift causes bugs that are impossible to reproduce, broken 
 ## ✨ Features
 
 - **CLI-first workflow** — `envsync push`, `envsync pull`, `envsync diff` — feels like git for your `.env`
-- **End-to-end encryption** — secrets encrypted client-side with `libsodium` before ever hitting the server
-- **Real-time notifications** — teammates get notified instantly via Redis pub/sub when variables change
+- **End-to-end encryption** — secrets encrypted client-side with `libsodium` (XSalsa20-Poly1305) before ever hitting the server
+- **Zero-knowledge by design** — server only stores ciphertext; no one can read your secrets without your passphrase
+- **Argon2id key derivation** — memory-hard KDF protects against brute force
+- **Versioned snapshots** — every push creates an immutable version; rollback to any previous state
 - **Environment scoping** — separate vaults for `development`, `staging`, `production`
-- **Audit log** — full history of who changed what, when, and from where
-- **`.env` diff viewer** — visual diff in the web dashboard showing exactly what changed between versions
-- **Org & project management** — multi-team support with role-based access control (Admin, Editor, Viewer)
-- **MinIO backups** — encrypted vault snapshots stored in self-hosted S3-compatible object storage
+- **Web dashboard** — manage projects, browse snapshot history, and copy CLI commands
+- **Audit trail** — every push records who pushed it and when
 - **Keycloak SSO** — enterprise-grade identity: OIDC login, MFA, LDAP, team provisioning
+- **100% self-hosted** — Docker Compose one-liner; nothing phones home
 
 ---
 
@@ -49,35 +50,30 @@ Environment variable drift causes bugs that are impossible to reproduce, broken 
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                        CLI Tool                         │
-│              envsync push / pull / diff                 │
+│                   CLI Tool (Rust)                       │
+│      envsync push / pull / diff / rollback / log        │
+│         XSalsa20-Poly1305 + Argon2id (client-side)      │
 └────────────────────────┬────────────────────────────────┘
-                         │ HTTPS (via NGINX)
-                         │ E2E Encrypted Payload
+                         │ HTTPS · E2E Encrypted Payload
 ┌────────────────────────▼────────────────────────────────┐
-│                     NGINX                               │
-│              Reverse Proxy / TLS termination            │
-└──────────────────────┬──────────────────────────────────┘
-                       │
-┌──────────────────────▼──────────────────────────────────┐
-│                  Spring Boot API                        │
-│         Auth · Vault CRUD · Audit Logging               │
+│               Spring Boot API (port 8081)               │
+│         Auth · Vault CRUD · Snapshot versioning         │
 └──────┬──────────────────┬──────────────────┬────────────┘
        │                  │                  │
 ┌──────▼──────┐   ┌───────▼──────┐   ┌──────▼──────┐
 │  PostgreSQL │   │    Redis     │   │    MinIO    │
 │  Vaults &   │   │  Pub/Sub     │   │   Encrypted │
-│  Audit Logs │   │  Notifications│  │   Backups   │
+│  Snapshots  │   │  (planned)   │   │   Backups   │
 └─────────────┘   └──────────────┘   └─────────────┘
 
 ┌─────────────────────────────────────────────────────────┐
-│                    Keycloak                             │
-│       SSO · OIDC · Role Management · User Provisioning  │
+│                     Keycloak (port 8180)                │
+│          SSO · OIDC · OAuth2 Device Code Flow           │
 └─────────────────────────────────────────────────────────┘
                          │
 ┌────────────────────────▼────────────────────────────────┐
-│                  Next.js Dashboard                      │
-│        Web UI · Real-time updates · Diff viewer         │
+│             Next.js Dashboard (port 3000)               │
+│         Projects · Snapshot history · CLI guide         │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -85,19 +81,17 @@ Environment variable drift causes bugs that are impossible to reproduce, broken 
 
 ## 🛠️ Tech Stack
 
-| Layer | Technology | Self-Hosted Replaces |
+| Layer | Technology | Version |
 |---|---|---|
-| **Frontend** | Next.js 15 (App Router) | — |
-| **Backend** | Spring Boot 3 (Java) | — |
-| **Database** | PostgreSQL 16 | AWS RDS |
-| **Cache / Pub-Sub** | Redis 7 | AWS ElastiCache / SQS |
-| **Object Storage** | MinIO | AWS S3 |
-| **Identity / Auth** | Keycloak (OIDC) | AWS IAM / Cognito |
-| **Reverse Proxy** | NGINX | AWS CloudFront |
-| **Encryption** | libsodium / TweetNaCl.js | AWS KMS |
-| **ORM** | Hibernate / Spring Data JPA | — |
-| **CLI** | Node.js (npm package) | — |
-| **Containerization** | Docker Compose | AWS ECS / Fargate |
+| **Frontend** | Next.js (App Router) | 15/16 |
+| **Backend** | Spring Boot | 3.x / Java 21 |
+| **CLI** | Rust | 2024 Edition |
+| **Database** | PostgreSQL | 15 |
+| **Cache / Pub-Sub** | Redis | 7 |
+| **Object Storage** | MinIO | latest |
+| **Identity / Auth** | Keycloak (OIDC) | latest |
+| **CLI Encryption** | libsodium (sodiumoxide) | XSalsa20-Poly1305 |
+| **Key Derivation** | Argon2id | 64 MB, 3 iterations |
 
 ---
 
@@ -106,8 +100,9 @@ Environment variable drift causes bugs that are impossible to reproduce, broken 
 ### Prerequisites
 
 - Docker & Docker Compose
-- Java 21+
-- Node.js 20+
+- Java 21+ (for backend development)
+- Node.js 20+ (for frontend development)
+- Rust toolchain (for CLI development)
 
 ### 1. Clone & Start Infrastructure
 
@@ -115,54 +110,65 @@ Environment variable drift causes bugs that are impossible to reproduce, broken 
 git clone https://github.com/yourusername/envsync.git
 cd envsync
 docker compose up -d
-# Starts: PostgreSQL, Redis, MinIO, Keycloak, NGINX
+# Starts: PostgreSQL (5432), Redis (6379), MinIO (9000/9001),
+#         Keycloak (8180), pgAdmin (5050)
 ```
 
 ### 2. Configure Keycloak
 
 ```
 Open http://localhost:8180
-Admin console → Create realm: "envsync"
-Create client: "envsync-api"
-Set redirect URIs: http://localhost:3000/*
+Admin credentials: admin / admin
+
+1. Create realm: "envsync"
+2. Create client: "envsync-app"
+   - Client authentication: ON
+   - Valid redirect URIs: http://localhost:3000/*
+3. Create client: "envsync-app-cli"
+   - OAuth 2.0 Device Authorization Grant: enabled
+4. Create a test user in the realm
 ```
 
-### 3. Configure MinIO
-
-```
-Open http://localhost:9001 (MinIO Console)
-Create bucket: "envsync-backups"
-Generate access key → paste into backend .env
-```
-
-### 4. Start the Backend
+### 3. Start the Backend
 
 ```bash
 cd backend
-cp .env.example .env   # fill in Keycloak + MinIO credentials
 ./mvnw spring-boot:run
-# API at http://localhost:8080
+# API at http://localhost:8081
 ```
 
-### 5. Start the Frontend
+The backend auto-creates tables via Hibernate DDL (`ddl-auto=update`). No migrations needed.
+
+### 4. Start the Frontend
 
 ```bash
 cd frontend
+cp .env.example .env.local   # fill in Keycloak client credentials
 npm install
 npm run dev
 # Dashboard at http://localhost:3000
 ```
 
-### 6. Install the CLI
+Required environment variables (`.env.local`):
 
 ```bash
-npm install -g envsync-cli
+NEXTAUTH_URL=http://localhost:3000
+NEXTAUTH_SECRET=<random-32-char-string>
+KEYCLOAK_CLIENT_ID=envsync-frontend
+KEYCLOAK_CLIENT_SECRET=<from-keycloak-console>
+KEYCLOAK_ISSUER=http://localhost:8180/realms/envsync
+NEXT_PUBLIC_API_URL=http://localhost:8081
+```
 
-envsync login              # OIDC flow via Keycloak
-envsync init               # initialize in your project
-envsync push               # push your .env to the vault
-envsync pull               # pull latest secrets
-envsync diff               # see what changed
+### 5. Build & Use the CLI
+
+```bash
+cd cli/envsync-cli
+cargo build --release
+# Binary at: ./target/release/envsync
+
+# Or add to PATH:
+cargo install --path .
 ```
 
 ---
@@ -170,51 +176,42 @@ envsync diff               # see what changed
 ## 📖 CLI Reference
 
 ```bash
+# Authentication
+envsync login                         # OAuth2 device code flow via Keycloak
+envsync logout                        # clear stored credentials
+envsync status                        # show auth status, project, token expiry
+
+# Project initialization (run in your project directory)
+envsync init                          # interactive — prompts for name & env
 envsync init --project my-app --env development
-envsync push                          # push local .env → vault
-envsync pull                          # pull vault → local .env
-envsync diff                          # diff local vs vault
-envsync log                           # view audit log
-envsync set DATABASE_URL "postgres://..."
+
+# Vault operations
+envsync push                          # encrypt & push local .env → vault
+envsync push -m "add stripe webhook"  # with a commit message
+envsync push --force                  # skip conflict check
+envsync pull                          # pull latest snapshot → local .env
+envsync pull --force                  # skip confirmation prompt
+
+# Inspection
+envsync diff                          # diff local .env vs latest remote snapshot
+envsync diff --show-values            # show actual values (not masked)
+envsync log                           # snapshot history (last 20)
+envsync log --limit 50
+
+# Mutation helpers
+envsync set DATABASE_URL "postgres://..." -m "update db url"
 envsync unset OLD_API_KEY
-envsync envs                          # list environments (dev/staging/prod)
-envsync history                       # version history of the vault
-envsync rollback --version 12         # restore a previous vault version
+
+# History
+envsync rollback --version 12         # restore vault to v12 content (creates new snapshot)
+envsync rollback --version 12 --yes   # skip confirmation
 ```
 
----
+**Global flags:**
 
-## 📁 Project Structure
-
-```
-envsync/
-├── frontend/               # Next.js 15 dashboard
-│   ├── app/
-│   │   ├── (auth)/         # Keycloak OIDC login flow
-│   │   ├── dashboard/      # Overview & notifications
-│   │   ├── projects/       # Project vault management
-│   │   └── audit/          # Audit log viewer
-│   └── components/
-│       ├── DiffViewer/     # .env diff component
-│       └── VaultEditor/    # Secret CRUD UI
-│
-├── backend/                # Spring Boot API
-│   └── src/main/java/
-│       ├── auth/           # Keycloak + Spring Security OIDC
-│       ├── vault/          # Vault CRUD & versioning
-│       ├── audit/          # Audit log service
-│       ├── notification/   # Redis pub/sub notifications
-│       └── storage/        # MinIO backup service
-│
-├── cli/                    # Node.js CLI tool
-│   └── src/
-│       ├── commands/       # push, pull, diff, set, unset, rollback
-│       └── crypto/         # libsodium client-side encryption
-│
-├── nginx/
-│   └── nginx.conf          # Reverse proxy + TLS config
-│
-└── docker-compose.yml      # Full self-hosted stack
+```bash
+envsync --api-url http://my-server:8081 <command>
+# or: export ENVSYNC_API_URL=http://my-server:8081
 ```
 
 ---
@@ -223,11 +220,87 @@ envsync/
 
 EnvSync uses a **zero-knowledge encryption** model:
 
-1. Secret key derived locally from your password using **Argon2**
-2. Secrets encrypted **before** leaving your machine using **XChaCha20-Poly1305**
-3. Server only ever stores ciphertext — it physically cannot read your secrets
-4. Team sharing via asymmetric encryption — each member's public key wraps the vault key
-5. Identity via **Keycloak** — supports MFA, LDAP federation, and social login out of the box
+1. **Key derivation** — your passphrase → 32-byte secret key via Argon2id (64 MB, 3 iterations, 1 thread)
+2. **Client-side encrypt** — `.env` → JSON → XSalsa20-Poly1305 encryption with a random nonce; ciphertext is base64-encoded
+3. **Server stores ciphertext only** — PostgreSQL never sees plaintext; the server physically cannot read your secrets
+4. **X25519 keypair** — generated on first login, private key encrypted with your master key; public key registered with the server for future team-sharing features
+5. **Identity via Keycloak** — supports MFA, LDAP federation, social login; CLI uses OAuth2 Device Code flow (no browser required)
+6. **Token auto-refresh** — CLI automatically refreshes expired access tokens using the stored refresh token
+
+---
+
+## 📁 Project Structure
+
+```
+envsync/
+├── frontend/               # Next.js dashboard
+│   └── src/
+│       ├── app/
+│       │   ├── page.tsx              # Landing page
+│       │   ├── dashbaord/            # Dashboard (authenticated)
+│       │   │   ├── page.tsx          # Projects list
+│       │   │   ├── layout.tsx        # Sidebar navigation
+│       │   │   └── projects/[id]/    # Project detail + snapshots
+│       │   └── api/auth/             # NextAuth Keycloak handler
+│       └── lib/
+│           ├── auth.ts               # NextAuth options
+│           └── api.ts                # Backend API client
+│
+├── backend/                # Spring Boot 3 REST API
+│   └── src/main/java/com/envsync/backend/
+│       ├── controller/     # ProjectController, SnapshotController, UserController
+│       ├── service/        # ProjectService, SnapshotService, UserPubkeyService
+│       ├── model/          # JPA entities: Project, Snapshot, UserPubkey
+│       ├── repository/     # Spring Data JPA repositories
+│       ├── dto/            # Request/Response DTOs
+│       ├── SecurityConfig.java      # CORS + JWT + OAuth2 Resource Server
+│       └── GlobalExceptionHandler.java  # Validation + error responses
+│
+└── cli/envsync-cli/        # Rust CLI
+    └── src/
+        ├── commands/       # login, logout, init, push, pull, diff,
+        │                   # log, set, unset, rollback, status
+        ├── api/            # vault.rs (HTTP client), auth.rs (device code + refresh)
+        ├── crypto.rs       # Argon2id + XSalsa20-Poly1305 + X25519
+        ├── config.rs       # Config persistence + auto token refresh
+        └── cli.rs          # clap CLI definition
+```
+
+---
+
+## 🔌 API Reference
+
+All endpoints require `Authorization: Bearer <keycloak-token>`.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/projects` | Create project |
+| `GET` | `/api/projects` | List my projects |
+| `GET` | `/api/projects/{id}` | Get project |
+| `DELETE` | `/api/projects/{id}` | Delete project |
+| `POST` | `/api/projects/{id}/snapshots` | Push snapshot |
+| `GET` | `/api/projects/{id}/snapshots` | List snapshots (`?limit=N`) |
+| `GET` | `/api/projects/{id}/snapshots/latest` | Get latest snapshot |
+| `GET` | `/api/projects/{id}/snapshots/{snapId}` | Get snapshot by ID |
+| `PUT` | `/api/users/me/pubkey` | Register X25519 public key |
+
+---
+
+## 🧪 Testing
+
+```bash
+# CLI tests (crypto roundtrips)
+cd cli/envsync-cli
+cargo test
+
+# Backend unit tests (no database required)
+cd backend
+./mvnw test
+
+# Frontend type-check + build
+cd frontend
+npm run build
+```
 
 ---
 

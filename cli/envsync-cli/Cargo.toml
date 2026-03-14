@@ -5,7 +5,9 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0.102"
-clap = "4.5.60"
+clap = { version = "4.5.60", features = ["derive", "env"] }
+argon2 = "0.5"
+base64 = "0.22"
 comfy-table = "7.2.2"
 console = "0.16.2"
 ctrlc = "3.5.2"
